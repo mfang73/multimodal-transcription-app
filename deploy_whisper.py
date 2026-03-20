@@ -1,7 +1,6 @@
 # Databricks notebook source
-# Prerequisites: Install the "Whisper V3" model from Databricks Marketplace
-# Marketplace > search "Whisper V3" > "Get instant access"
-# This creates the catalog "databricks_whisper_v3_models" with the pre-registered model.
+# Deploys the Whisper Large V3 model from the system.ai catalog
+# as a model serving endpoint for audio transcription.
 
 # COMMAND ----------
 
@@ -14,9 +13,8 @@ import datetime
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import EndpointCoreConfigInput
 
-# Marketplace model location (created when you install from Marketplace)
-catalog_name = "databricks_whisper_v3_models"
-model_uc_path = f"{catalog_name}.models.whisper_large_v3"
+# Model is pre-registered in the system.ai catalog
+model_uc_path = "system.ai.whisper_large_v3"
 version = "1"
 
 w = WorkspaceClient()
