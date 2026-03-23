@@ -10,11 +10,23 @@
 # COMMAND ----------
 
 # Configuration — override via job parameters or widgets
-CATALOG = dbutils.widgets.get("catalog") if "catalog" in [w.name for w in dbutils.widgets.getAll()] else "uplight_demo_gen_catalog"
-SCHEMA = dbutils.widgets.get("schema") if "schema" in [w.name for w in dbutils.widgets.getAll()] else "watlow_ingestion"
-VOLUME = dbutils.widgets.get("volume") if "volume" in [w.name for w in dbutils.widgets.getAll()] else "raw_documents"
-PARSED_TABLE = dbutils.widgets.get("parsed_table") if "parsed_table" in [w.name for w in dbutils.widgets.getAll()] else "parsed_documents_gemini"
-WHISPER_ENDPOINT = dbutils.widgets.get("whisper_endpoint") if "whisper_endpoint" in [w.name for w in dbutils.widgets.getAll()] else "whisper-transcriber"
+_DEFAULTS = {
+    "catalog": "uplight_demo_gen_catalog",
+    "schema": "watlow_ingestion",
+    "volume": "raw_documents",
+    "parsed_table": "parsed_documents_gemini",
+    "whisper_endpoint": "whisper-transcriber",
+}
+_widget_names = {w.name for w in dbutils.widgets.getAll()}
+
+def _get_param(name):
+    return dbutils.widgets.get(name) if name in _widget_names else _DEFAULTS[name]
+
+CATALOG = _get_param("catalog")
+SCHEMA = _get_param("schema")
+VOLUME = _get_param("volume")
+PARSED_TABLE = _get_param("parsed_table")
+WHISPER_ENDPOINT = _get_param("whisper_endpoint")
 
 VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
 TABLE_NAME = f"{CATALOG}.{SCHEMA}.{PARSED_TABLE}"
@@ -33,11 +45,10 @@ print(f"Endpoint: {WHISPER_ENDPOINT}")
 # COMMAND ----------
 
 # Get all MP3 files in the volume
-all_files_df = spark.sql(f"""
-  SELECT path AS volume_path
-  FROM list_files('{VOLUME_PATH}')
-  WHERE lower(path) LIKE '%.mp3'
-""")
+from pyspark.sql import Row
+files = dbutils.fs.ls(VOLUME_PATH)
+mp3_rows = [Row(volume_path=f.path) for f in files if f.path.lower().endswith('.mp3')]
+all_files_df = spark.createDataFrame(mp3_rows) if mp3_rows else spark.createDataFrame([], "volume_path: string")
 
 # Get already-completed MP3s from the table
 completed_df = spark.sql(f"""
@@ -64,24 +75,41 @@ if unprocessed_count == 0:
 
 # COMMAND ----------
 
-# Transcribe all unprocessed MP3s via ai_query on the SQL warehouse
+# Transcribe unprocessed MP3s and prepare upsert records in a single pass.
+# Combining transcription + field extraction avoids re-running expensive ai_query calls.
+# failOnError => FALSE lets the batch continue even if individual files fail.
 unprocessed_df.createOrReplaceTempView("unprocessed_mp3s")
 
-transcribed_df = spark.sql(f"""
+results_df = spark.sql(f"""
+  WITH raw_results AS (
+    SELECT
+      u.volume_path,
+      ai_query(
+        '{WHISPER_ENDPOINT}',
+        f.content,
+        returnType => 'STRING',
+        failOnError => FALSE
+      ) AS transcription
+    FROM unprocessed_mp3s u
+    JOIN read_files('{VOLUME_PATH}/*.mp3', format => 'binaryFile') f
+      ON f.path = u.volume_path
+  )
   SELECT
-    u.volume_path,
-    ai_query(
-      '{WHISPER_ENDPOINT}',
-      f.content,
-      'returnType', 'STRING'
-    ) AS transcript
-  FROM unprocessed_mp3s u
-  JOIN read_files('{VOLUME_PATH}/*.mp3', format => 'binaryFile') f
-    ON f.path = u.volume_path
+    regexp_extract(volume_path, '/([^/]+)\\.mp3$', 1) AS document_id,
+    regexp_extract(volume_path, '/([^/]+\\.mp3)$', 1) AS filename,
+    '.mp3' AS file_type,
+    current_timestamp() AS upload_timestamp,
+    volume_path,
+    transcription.result AS parsed_content,
+    CASE
+      WHEN transcription.errorMessage IS NULL THEN 'completed'
+      ELSE 'failed'
+    END AS parse_status,
+    COALESCE(transcription.errorMessage, 'batch_transcribe') AS parse_metadata
+  FROM raw_results
 """)
 
-transcribed_count = transcribed_df.count()
-print(f"Transcribed {transcribed_count} files")
+results_df.createOrReplaceTempView("batch_results")
 
 # COMMAND ----------
 
@@ -90,25 +118,8 @@ print(f"Transcribed {transcribed_count} files")
 
 # COMMAND ----------
 
-from pyspark.sql.functions import col, current_timestamp, lit, regexp_extract
-import uuid
-
-# Prepare records for upsert
-results_df = transcribed_df.select(
-    regexp_extract(col("volume_path"), r"/([^/]+)\.mp3$", 1).alias("document_id"),
-    regexp_extract(col("volume_path"), r"/([^/]+\.mp3)$", 1).alias("filename"),
-    lit(".mp3").alias("file_type"),
-    current_timestamp().alias("upload_timestamp"),
-    col("volume_path"),
-    col("transcript").alias("parsed_content"),
-    lit("completed").alias("parse_status"),
-    lit("batch_transcribe").alias("parse_metadata"),
-)
-
-results_df.createOrReplaceTempView("batch_results")
-
 # Merge — update existing failed/processing records, insert new ones
-spark.sql(f"""
+merge_result = spark.sql(f"""
   MERGE INTO {TABLE_NAME} t
   USING batch_results s
   ON t.volume_path = s.volume_path
@@ -122,4 +133,5 @@ spark.sql(f"""
     VALUES (s.document_id, s.filename, s.file_type, s.upload_timestamp, s.volume_path, s.parsed_content, s.parse_status, s.parse_metadata)
 """)
 
-print(f"Batch transcription complete. Processed {transcribed_count} files.")
+display(merge_result)
+print("Batch transcription complete.")
