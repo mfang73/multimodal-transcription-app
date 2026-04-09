@@ -10,6 +10,7 @@ from pathlib import Path
 from databricks.sdk import WorkspaceClient
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # Read config once at module level
@@ -242,7 +243,10 @@ async def list_documents(limit: int = 50):
                     "parse_status": row[4],
                     "content_length": row[5],
                 })
-        return {"documents": documents, "total": len(documents)}
+        return JSONResponse(
+            content={"documents": documents, "total": len(documents)},
+            headers={"Cache-Control": "no-store"},
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list documents: {e}")
 
