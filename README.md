@@ -47,23 +47,7 @@ React Frontend
 
 ## Setup
 
-### 1. Deploy the Whisper endpoint
-
-Run `deploy_whisper.py` as a notebook or job. This creates a `whisper-transcriber` model serving endpoint using the Whisper Large V3 model from `system.ai`.
-
-### 2. Configure app.yaml
-
-Update the environment variables in `app.yaml`:
-
-| Variable | Description |
-|----------|-------------|
-| `CATALOG` | Unity Catalog catalog name |
-| `SCHEMA` | Schema for tables and volumes |
-| `VOLUME` | Volume name for raw document storage |
-| `PARSED_TABLE` | Delta table name for parsed content |
-| `DATABRICKS_WAREHOUSE_ID` | SQL Warehouse ID (via `sql-warehouse` resource) |
-
-### 3. Deploy via Databricks Asset Bundle
+### Option A: Deploy via Databricks Asset Bundle (Recommended)
 
 The project includes a `databricks.yml` for reproducible multi-workspace deployment. It deploys the app, a Whisper deploy job, and a keepalive scheduled job.
 
@@ -91,14 +75,24 @@ databricks bundle deploy -t dev
 - `[dev] Deploy Whisper Endpoint` job — one-time notebook to create/update the Whisper serving endpoint
 - `[dev] Whisper Keepalive` job — scheduled every 30 min, Mon–Fri 8am–5pm CT
 
-Alternatively, deploy the app manually:
+### Option B: Manual Deployment
+
+If you prefer not to use the DAB, you can deploy each component manually:
+
+**1. Deploy the Whisper endpoint** — Run `deploy_whisper.py` as a notebook or job.
+
+**2. Configure app.yaml** — Update the environment variables (`CATALOG`, `SCHEMA`, `VOLUME`, `PARSED_TABLE`, `DATABRICKS_WAREHOUSE_ID`).
+
+**3. Deploy the app:**
 
 ```bash
 databricks apps create --name watlow-knowledge-ingestion
 databricks apps deploy watlow-knowledge-ingestion --source-code-path /Workspace/path/to/this/project
 ```
 
-### 4. (Optional) Batch transcribe
+**4. Schedule keepalive** — Run `keepalive.py` on a schedule (e.g., every 30 min during business hours).
+
+### (Optional) Batch transcribe
 
 Run `batch_transcribe.py` as a notebook or scheduled job to bulk-transcribe MP3 files that haven't been processed yet. This is useful for:
 
@@ -110,9 +104,6 @@ The notebook scans the UC Volume for unprocessed MP3s, transcribes them via `ai_
 
 Override defaults via Databricks widgets or job parameters: `catalog`, `schema`, `volume`, `parsed_table`, `whisper_endpoint`.
 
-### 5. (Optional) Schedule keepalive
-
-Run `keepalive.py` on a schedule (e.g., every 30 minutes during business hours) to keep the Whisper endpoint warm and avoid cold-start latency.
 
 ## API Endpoints
 
