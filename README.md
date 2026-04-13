@@ -1,6 +1,6 @@
-# Watlow Knowledge Ingestion
+# Multimodal Transcription App
 
-A Databricks App that ingests documents (PDFs, images, audio) and extracts their content using AI. Built with FastAPI + React.
+A Databricks App that ingests documents (PDFs, images, audio, video) and extracts their content using AI. Built with FastAPI + React.
 
 ## What It Does
 
