@@ -4,9 +4,9 @@ A Databricks App that ingests documents (PDFs, images, audio, video) and extract
 
 ## What It Does
 
-- Upload PDFs, images (PNG/JPG/TIFF/BMP), and MP3 audio files through a web portal
+- Upload PDFs, images (PNG/JPG/TIFF/BMP), MP3 audio files, or MP4 video files through a web portal
 - PDFs and images are parsed via `ai_parse_document` on a SQL warehouse
-- Audio files are transcribed via the Whisper Large V3 model on a serving endpoint
+- Audio/video files are transcribed via the Whisper Large V3 model on a serving endpoint
 - All files are stored in a Unity Catalog Volume with parsed content in a Delta table
 
 ## Architecture
