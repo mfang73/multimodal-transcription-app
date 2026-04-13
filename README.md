@@ -29,6 +29,10 @@ React Frontend
 │   └── main.py              # FastAPI app — upload, parse, transcribe, CRUD
 ├── frontend/
 │   └── build/               # React frontend (pre-built static files)
+├── databricks.yml            # DAB config — bundle variables and deployment targets
+├── resources/
+│   ├── app.yml               # App resource definition (env vars, SQL warehouse)
+│   └── jobs.yml              # Job resources (deploy whisper, keepalive schedule)
 ├── deploy_whisper.py         # Notebook: deploy Whisper V3 from system.ai
 ├── batch_transcribe.py       # Notebook: batch transcribe unprocessed MP3s offline
 ├── keepalive.py              # Notebook: ping whisper endpoint to prevent scale-to-zero
@@ -59,7 +63,35 @@ Update the environment variables in `app.yaml`:
 | `PARSED_TABLE` | Delta table name for parsed content |
 | `DATABRICKS_WAREHOUSE_ID` | SQL Warehouse ID (via `sql-warehouse` resource) |
 
-### 3. Deploy the app
+### 3. Deploy via Databricks Asset Bundle
+
+The project includes a `databricks.yml` for reproducible multi-workspace deployment. It deploys the app, a Whisper deploy job, and a keepalive scheduled job.
+
+**Variables** (override per target in `databricks.yml`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `catalog` | `uplight_demo_gen_catalog` | Unity Catalog catalog |
+| `schema` | `watlow_ingestion` | Schema for tables and volumes |
+| `volume` | `raw_documents` | Volume for raw document storage |
+| `parsed_table` | `parsed_documents_gemini` | Delta table for parsed content |
+| `whisper_endpoint` | `whisper-transcriber` | Model serving endpoint name |
+
+**Deploy:**
+
+```bash
+databricks bundle validate -t dev
+databricks bundle deploy -t dev
+```
+
+**Targets:** `dev` (default), `prod` — both configurable in `databricks.yml`.
+
+**What gets deployed:**
+- The Databricks App (with parameterized env vars)
+- `[dev] Deploy Whisper Endpoint` job — one-time notebook to create/update the Whisper serving endpoint
+- `[dev] Whisper Keepalive` job — scheduled every 30 min, Mon–Fri 8am–5pm CT
+
+Alternatively, deploy the app manually:
 
 ```bash
 databricks apps create --name watlow-knowledge-ingestion
